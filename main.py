@@ -1,48 +1,67 @@
 import threading
-import queue
+import collections
 import time
 import random
 
-# 定義隊列
-q = queue.Queue()
+# buffer 大小
+BUFFER_SIZE = 4
 
-# 生產者類
-class Producer(threading.Thread):
-    def run(self):
-        for i in range(10):
-            item = random.randint(1, 100)
-            q.put(item)
-            print(f"Producer put item: {item} in queue.")
-            print(f"Queue now: {list(q.queue)}")  # 顯示隊列內容
-            time.sleep(1)
+# 創建共用 buffer
+buffer = collections.deque(maxlen=BUFFER_SIZE)
 
-# 消費者類
-class Consumer(threading.Thread):
-    def run(self):
-        while True:
-            item = q.get()
-            if item is None:
-                break
-            print(f"Consumer got item: {item} from queue.")
-            print(f"Queue now: {list(q.queue)}")  # 顯示隊列內容
-            time.sleep(2)
-            q.task_done()
+# 創建兩個 semaphore
+empty = threading.Semaphore(BUFFER_SIZE)
+full = threading.Semaphore(0)
 
-# 創建生產者和消費者
-producer = Producer()
-consumer = Consumer()
+# 創建一個 mutex lock
+mutex = threading.Lock()
 
-# 啟動生產者和消費者
-producer.start()
-consumer.start()
+def producer(num):
+    for i in range(1, 11):
+        # 等待 buffer 有空位
+        empty.acquire()
+        # 鎖住，將物品放入 buffer
+        mutex.acquire()
+        buffer.append(i)
+        print(f"Producer {num}: Produced item {i}")
+        print(f"Producer {num}: Buffer: {list(buffer)}")
+        print()
+        # 放完釋放鎖
+        mutex.release()
+        # 通知消費者有新的物品可消費
+        full.release()
+        # 隨機睡眠一段時間
+        time.sleep(random.randint(0, 5) / 10)
+    print(f"*****Producer {num} finished.*****")
 
-# 等待生產者結束
-producer.join()
+def consumer(num):
+    for _ in range(1, 11):
+        # 等待 buffer 有物品可消費
+        full.acquire()
+        # 鎖住，從 buffer 取出物品
+        mutex.acquire()
+        item = buffer.popleft()
+        print(f"Consumer {num}: Consumed item {item}")
+        print(f"Consumer {num}: Buffer: {list(buffer)}")
+        print()
+        # 拿完釋放鎖
+        mutex.release()
+        # 通知生產者有空位可放入新的物品
+        empty.release()
+        # 隨機睡眠一段時間
+        time.sleep(random.randint(0, 10) / 10)
+    print(f"*****Consumer {num} finished.*****")
 
-# 發送None給消費者,讓其結束
-q.put(None)
+# 創建生產者和消費者 threads 各 2 個
+producer_threads = [threading.Thread(target=producer, args=(i+1,)) for i in range(2)]
+consumer_threads = [threading.Thread(target=consumer, args=(i+1,)) for i in range(2)]
 
-# 等待消費者結束
-q.join()
+# 啟動 threads
+for thread in producer_threads + consumer_threads:
+    thread.start()
 
-print("All tasks completed.")
+# 等待 threads 結束
+for thread in producer_threads + consumer_threads:
+    thread.join()
+
+print("All done.")
